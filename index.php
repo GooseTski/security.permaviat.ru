@@ -10,6 +10,8 @@
 		
 		<link rel="stylesheet" href="style.css">
 		<script src="https://code.jquery.com/jquery-1.8.3.js"></script>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/3.1.2/rollups/aes.js"></script>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/3.1.2/rollups/md5.js"></script>
 	</head>
 	<body>
 		<div class="top-menu">
@@ -22,8 +24,6 @@
 					Пермский авиационный техникум им. А. Д. Швецова
 				</a>
 			</div>
-			
-			
 		</div>
 		<div class="space"> </div>
 		<div class="main">
@@ -32,9 +32,9 @@
 				
 				<div>
 					<?php
-						$query_news = $mysqli->query("SELECT * FROM `news`;");
+						$query_news = $mysqli->query("SELECT * FROM `news` ORDER BY `id` DESC;");
 						while($read_news = $query_news->fetch_assoc()) {
-							$QueryMessages = $mysqli->query("SELECT * FROM `comments` WHERE `IdPost` = {$read_news["id"]}");
+							$QueryMessages = $mysqli->query("SELECT * FROM `comments` WHERE `IdPost` = {$read_news["id"]} ORDER BY `id` DESC");
 
 							echo '
 								<div class="specialty">
@@ -44,24 +44,20 @@
 											<div class="description" style="overflow: auto;">
 												<img src = "'.$read_news["img"].'" style="width: 50px; box-shadow: 0 2px 2px 0 rgba(0,0,0,.14), 0 3px 1px -2px rgba(0,0,0,.12), 0 1px 5px 0 rgba(0,0,0,.2); float: left; margin-right: 10px;">
 												'.$read_news["text"].'
-												
 											</div>
-											<div class="messages">
-												';
+											<div class="messages" id="messages_'.$read_news["id"].'">';
 												while($ReadMessages = $QueryMessages->fetch_assoc()) {
-													echo "<div>".$ReadMessages["Messages"]."</div>";
+													echo "<div>".htmlspecialchars($ReadMessages["Messages"])."</div>";
 												}
 											echo '</div>';
 
-											
-											if (isset($_SESSION['user'])) {
+											if (isset($_SESSION['user']) && $_SESSION['user'] != -1) {
 												echo 
-													'<div class="messages" id="'.$read_news["id"].'">
-														<input type="text">
+													'<div class="comment-section" id="'.$read_news["id"].'">
+														<input type="text" placeholder="Ваш комментарий..." class="comment-input">
 														<div class="button" style="float: right; margin-top: 0px; margin-right: 0px;" onclick="SendMessage(this)">Отправить</div>
 													</div>';
 											}
-											
 										echo 
 										'</div>
 									</div>
@@ -79,34 +75,75 @@
 		</div>
 	</body>
 	<script>
+		const secretKey = "qazxswedcvfrtgbn";
+		
+		function encryptAES(data, key) {
+			var keyHash = CryptoJS.MD5(key);
+			var keyBytes = CryptoJS.enc.Hex.parse(keyHash.toString());
+			var iv = CryptoJS.lib.WordArray.random(16);
+			var encrypted = CryptoJS.AES.encrypt(data, keyBytes, {
+				iv: iv,
+				mode: CryptoJS.mode.CBC,
+				padding: CryptoJS.pad.Pkcs7
+			});
+			var combined = iv.concat(encrypted.ciphertext);
+			return CryptoJS.enc.Base64.stringify(combined);
+		}
+		
 		function SendMessage(sender) {
-			let Message = sender.parentElement.children[0].value;
+			let Message = sender.parentElement.querySelector('.comment-input').value;
 			let IdPost = sender.parentElement.id;
-			if(Message == "") return;
+			
+			if(Message.trim() == "") {
+				alert("Введите сообщение");
+				return;
+			}
 
+	
+			var encryptedMessage = encryptAES(Message, secretKey);
+			
+			var loading = document.createElement('img');
+			loading.src = 'img/loading.gif';
+			loading.className = 'loading';
+			loading.style.width = '20px';
+			loading.style.display = 'inline-block';
+			sender.parentElement.appendChild(loading);
+			sender.style.display = 'none';
+			
 			var Data = new FormData();
-			Data.append("Message", Message);
+			Data.append("Message", encryptedMessage);
 			Data.append("IdPost", IdPost);
 			
 			$.ajax({
-					url         : 'ajax/message.php',
-					type        : 'POST',
-					data        : Data,
-					cache       : false,
-					dataType    : 'html',
-					processData : false,
-					contentType : false, 
-					success: function (_data) {
-						console.log(_data);
-						sender.parentElement.children[0].value = "";
-						sender.parentElement.parentElement.children[2].innerHTML += "<div>" + Message + "</div>";
-
-					},
-					// функция ошибки
-					error: function( ){
-						console.log('Системная ошибка!');
+				url         : 'ajax/message.php',
+				type        : 'POST',
+				data        : Data,
+				cache       : false,
+				dataType    : 'html',
+				processData : false,
+				contentType : false, 
+				success: function (_data) {
+					console.log(_data);
+					if(_data == "1") {
+						let messagesDiv = document.getElementById('messages_' + IdPost);
+						let newMessage = document.createElement('div');
+						newMessage.textContent = Message;
+						messagesDiv.appendChild(newMessage);
+						
+						sender.parentElement.querySelector('.comment-input').value = "";
+					} else if(_data == "-1") {
+						alert("Ошибка при расшифровке сообщения");
 					}
-				});
+					
+					sender.parentElement.querySelector('.loading').remove();
+					sender.style.display = 'block';
+				},
+				error: function( ){
+					console.log('Системная ошибка!');
+					sender.parentElement.querySelector('.loading').remove();
+					sender.style.display = 'block';
+				}
+			});
 		}
 	</script>
 </html>
